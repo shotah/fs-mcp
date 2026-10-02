@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-label="fs-mcp - workspace files inside --root">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#15202b"/>
+      <stop offset="55%" stop-color="#1c2a38"/>
+      <stop offset="100%" stop-color="#243746"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7ec8c3"/>
+      <stop offset="100%" stop-color="#c8efe8"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a4f60"/>
+      <stop offset="100%" stop-color="#2a3a48"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="76%" cy="50%" r="30%">
+      <stop offset="0%" stop-color="#7ec8c3" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#7ec8c3" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#8fa3b4" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="420" fill="url(#sky)"/>
+  <rect width="1280" height="420" fill="url(#grid)"/>
+  <ellipse cx="960" cy="220" rx="280" ry="160" fill="url(#glow)"/>
+
+  <g transform="translate(72,56)">
+    <text x="0" y="64" fill="#f4f7fa" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="64" font-weight="700" letter-spacing="-1">fs-mcp</text>
+    <text x="2" y="104" fill="#7ec8c3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="2">--root JAIL  &#183;  ONE FILE  &#183;  STDIO</text>
+  </g>
+
+  <g transform="translate(690,108)" filter="url(#soft)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect width="500" height="210" rx="14" fill="#1a2834" stroke="url(#arc)" stroke-width="3"/>
+    <text x="22" y="32" fill="#7ec8c3" font-size="13" font-weight="700" letter-spacing="1">--root</text>
+    <g font-size="16">
+      <text x="28" y="72" fill="#c9d7e3">src/</text>
+      <text x="56" y="102" fill="#f4f7fa" font-weight="700">main.go</text>
+      <text x="56" y="132" fill="#f4f7fa">tools.go</text>
+      <text x="28" y="168" fill="#9fb3c5">README.md</text>
+    </g>
+    <rect x="300" y="78" width="168" height="36" rx="6" fill="#3f5870" stroke="#7ec8c3"/>
+    <text x="384" y="101" text-anchor="middle" fill="#f4f7fa" font-size="14" font-weight="700">file_patch</text>
+  </g>
+
+  <g transform="translate(72,300)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">
+    <rect width="108" height="28" rx="6" fill="url(#card)" stroke="#6f8799"/>
+    <text x="54" y="19" text-anchor="middle" fill="#c9d7e3">file_list</text>
+    <g transform="translate(120,0)">
+      <rect width="100" height="28" rx="6" fill="url(#card)" stroke="#6f8799"/>
+      <text x="50" y="19" text-anchor="middle" fill="#c9d7e3">file_get</text>
+    </g>
+    <g transform="translate(232,0)">
+      <rect width="128" height="28" rx="6" fill="url(#card)" stroke="#6f8799"/>
+      <text x="64" y="19" text-anchor="middle" fill="#c9d7e3">file_search</text>
+    </g>
+    <g transform="translate(372,0)">
+      <rect width="150" height="28" rx="6" fill="#3a2a2a" stroke="#c45c4a"/>
+      <text x="75" y="19" text-anchor="middle" fill="#e7b2a8">../escape</text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,89 @@
+version: "2"
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - forcetypeassert
+    - goconst
+    - gocritic
+    - gomodguard_v2
+    - gosec
+    - intrange
+    - misspell
+    - modernize
+    - nestif
+    - nilerr
+    - nilnil
+    - perfsprint
+    - prealloc
+    - predeclared
+    - revive
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    goconst:
+      min-len: 3
+      min-occurrences: 5
+      ignore-tests: true
+    gocritic:
+      disabled-checks:
+        - hugeParam
+        - unnamedResult
+        - paramTypeCombine
+        - rangeValCopy
+        - nestingReduce
+        - ifElseChain
+        - sprintfQuotedString
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+        - name: blank-imports
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # MCP handlers return (ToolResult, nil) with the error text in the result.
+      - linters:
+          - nilerr
+        path: tools/
+      - linters:
+          - goconst
+          - gosec
+          - errcheck
+          - revive
+          - forcetypeassert
+        path: _test\.go
+      - linters:
+          - staticcheck
+        path: _test\.go
+        text: "SA5011:"
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
