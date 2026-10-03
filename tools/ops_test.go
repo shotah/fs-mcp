@@ -199,7 +199,7 @@ func TestReadListSearchCreatePatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if patched != "patched: sub/a.txt" {
+	if patched != "patched: sub/a.txt\n1: alpha\n2: BETA" {
 		t.Fatalf("patch = %q", patched)
 	}
 	after, err := os.ReadFile(filepath.Join(root, "sub", "a.txt"))

@@ -196,7 +196,7 @@ func endsWithNewline(f *os.File) bool {
 func Search(ctx context.Context, root, path, query, glob string, limit int) (SearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return SearchResult{}, errors.New("query is required")
+		return SearchResult{}, fmt.Errorf("query is required, e.g. %s", queryExample)
 	}
 	abs, err := Resolve(root, path, false)
 	if err != nil {
@@ -308,7 +308,7 @@ func searchFile(abs, root, query string, room int) ([]Hit, error) {
 		if !strings.Contains(text, query) {
 			continue
 		}
-		hits = append(hits, Hit{Path: rel, Line: lineNo, Text: clipRunes(text, maxHitRunes)})
+		hits = append(hits, Hit{Path: rel, Line: lineNo, Text: clipRunes(text)})
 		if len(hits) >= room {
 			break
 		}
@@ -350,39 +350,80 @@ func Create(root, path, contents string) (string, error) {
 
 // Patch applies diff to one existing file. A mismatch writes nothing.
 func Patch(root, path, diff string) (string, error) {
-	abs, err := Resolve(root, path, false)
+	abs, rel, info, content, err := loadTextFile(root, path)
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.Mode().IsRegular() {
-		return "", errors.New("not a file")
-	}
-	if info.Size() > maxFileBytes {
-		return "", fmt.Errorf("file is too large (%d bytes)", info.Size())
-	}
-	content, err := os.ReadFile(abs) //nolint:gosec // G304: path resolved inside --root
-	if err != nil {
-		return "", err
-	}
-	if bytes.Contains(content, []byte{0}) {
-		return "", errors.New("binary file")
-	}
-	rel, err := Rel(root, abs)
-	if err != nil {
-		return "", err
-	}
-	next, err := ApplyUnified(rel, diff, content)
+	next, spans, err := applyUnified(rel, diff, content)
 	if err != nil {
 		return "", err
 	}
 	if err := writeAtomic(abs, next, info.Mode().Perm()); err != nil {
 		return "", err
 	}
-	return "patched: " + rel, nil
+	return formatPatchResult(rel, next, spans), nil
+}
+
+// Replace writes newText over each exact old in one file.
+// count 0 replaces every match. Any other count must equal the number of matches.
+// Zero matches or a count miss writes nothing.
+func Replace(root, path, old, newText string, count int) (string, error) {
+	if old == "" {
+		return "", errors.New("old is empty")
+	}
+	if count < 0 {
+		return "", errors.New("count must be at least 1")
+	}
+	abs, rel, info, content, err := loadTextFile(root, path)
+	if err != nil {
+		return "", err
+	}
+	text := string(content)
+	n := strings.Count(text, old)
+	if n == 0 {
+		return "", fmt.Errorf("0 matches for old in %s; nothing written", rel)
+	}
+	if count > 0 && n != count {
+		return "", fmt.Errorf("found %d matches for old in %s, want %d; nothing written", n, rel, count)
+	}
+	if old == newText {
+		return "", fmt.Errorf("old and new are the same in %s; nothing written", rel)
+	}
+	nextText, spans := replaceSpans(text, old, newText)
+	next := []byte(nextText)
+	if err := writeAtomic(abs, next, info.Mode().Perm()); err != nil {
+		return "", err
+	}
+	return formatPatchResult(rel, next, spans), nil
+}
+
+func loadTextFile(root, path string) (abs, rel string, info os.FileInfo, content []byte, err error) {
+	abs, err = Resolve(root, path, false)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	info, err = os.Stat(abs)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", nil, nil, errors.New("not a file")
+	}
+	if info.Size() > maxFileBytes {
+		return "", "", nil, nil, fmt.Errorf("file is too large (%d bytes)", info.Size())
+	}
+	content, err = os.ReadFile(abs) //nolint:gosec // G304: path resolved inside --root
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	if bytes.Contains(content, []byte{0}) {
+		return "", "", nil, nil, errors.New("binary file")
+	}
+	rel, err = Rel(root, abs)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	return abs, rel, info, content, nil
 }
 
 // Delete removes one file. Directories and globs are refused.
@@ -449,12 +490,12 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-func clipRunes(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
+func clipRunes(s string) string {
+	if utf8.RuneCountInString(s) <= maxHitRunes {
 		return s
 	}
 	runes := []rune(s)
-	return string(runes[:n])
+	return string(runes[:maxHitRunes])
 }
 
 // JSON encodes v for a tool result.

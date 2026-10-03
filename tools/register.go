@@ -30,8 +30,12 @@ const (
 	descGet    = "Read one text file by path."
 	descSearch = "Search file contents (grep) under a path."
 	descCreate = "Create one new file."
-	descPatch  = "Apply a unified diff (patch) to one existing file."
-	descDelete = "Delete one file by path."
+	descPatch  = "Edit one existing file."
+
+	pathExample  = `{"path":"a.go"}`
+	queryExample = `{"query":"needle"}`
+	patchExample = `{"path":"a.go","old":"Hello","new":"Greet"} or {"path":"a.go","diff":"@@ -1 +1 @@\n-old\n+new\n"}`
+	descDelete   = "Delete one file by path."
 )
 
 // ToolNames is the catalog for tier. core is five tools so a tied file hint lists all of them.
@@ -94,9 +98,12 @@ func Register(s *mcpserver.MCPServer, root, tier string) (int, error) {
 			})
 		case ToolFilePatch:
 			s.AddTool(mcp.NewTool(name,
-				mcp.WithDescription(descPatch+" The hunk must match or nothing is written."),
+				mcp.WithDescription(descPatch+" Send old and new to replace exact text everywhere it appears, or diff for a unified diff. Exactly one mode. Omit count to replace every match; set count to require that many. A miss writes nothing."),
 				mcp.WithString("path", mcp.Required(), mcp.Description("Existing file to patch.")),
-				mcp.WithString("diff", mcp.Required(), mcp.Description("Unified diff for that one file.")),
+				mcp.WithString("diff", mcp.Description("Unified diff for this one file. Omit when sending old and new.")),
+				mcp.WithString("old", mcp.Description("Exact text to replace, including a name that appears more than once. Omit when sending diff.")),
+				mcp.WithString("new", mcp.Description("Replacement for old. Empty deletes the matched text.")),
+				mcp.WithNumber("count", mcp.Description("Exact number of matches required. Omit to replace all. Any other number writes nothing.")),
 				mcp.WithDestructiveHintAnnotation(true),
 			), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				return patch(root, req)
@@ -129,7 +136,7 @@ func list(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 }
 
 func get(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	path, err := requirePath(req)
+	path, err := requirePath(req, pathExample)
 	if err != nil {
 		return toolErr(err), nil
 	}
@@ -143,7 +150,7 @@ func get(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 func search(ctx context.Context, root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query, err := req.RequireString("query")
 	if err != nil || strings.TrimSpace(query) == "" {
-		return toolErr(errors.New("query is required")), nil
+		return toolErr(fmt.Errorf("query is required, e.g. %s", queryExample)), nil
 	}
 	res, err := Search(ctx, root, req.GetString("path", ""), query, req.GetString("glob", ""), req.GetInt("limit", 0))
 	if err != nil {
@@ -157,7 +164,7 @@ func search(ctx context.Context, root string, req mcp.CallToolRequest) (*mcp.Cal
 }
 
 func create(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	path, err := requirePath(req)
+	path, err := requirePath(req, pathExample)
 	if err != nil {
 		return toolErr(err), nil
 	}
@@ -173,23 +180,56 @@ func create(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 }
 
 func patch(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	path, err := requirePath(req)
+	path, err := requirePath(req, patchExample)
 	if err != nil {
 		return toolErr(err), nil
 	}
-	diff, err := req.RequireString("diff")
-	if err != nil || strings.TrimSpace(diff) == "" {
-		return toolErr(errors.New("diff is required")), nil
-	}
-	text, err := Patch(root, path, diff)
+	text, err := editFile(root, path, req)
 	if err != nil {
 		return toolErr(err), nil
 	}
 	return mcp.NewToolResultText(text), nil
 }
 
+func editFile(root, path string, req mcp.CallToolRequest) (string, error) {
+	args := req.GetArguments()
+	diff := req.GetString("diff", "")
+	_, hasOld := args["old"]
+	_, hasNew := args["new"]
+	_, hasCount := args["count"]
+	hasDiff := strings.TrimSpace(diff) != ""
+	hasReplace := hasOld || hasNew
+	if hasDiff && hasReplace {
+		return "", fmt.Errorf("send exactly one of diff or old and new, e.g. %s", patchExample)
+	}
+	if hasCount && !hasOld {
+		return "", fmt.Errorf("count is only used with old and new, e.g. %s", patchExample)
+	}
+	if hasDiff {
+		return Patch(root, path, diff)
+	}
+	if !hasOld || req.GetString("old", "") == "" {
+		if hasNew {
+			return "", fmt.Errorf("old is required, e.g. %s", patchExample)
+		}
+		return "", fmt.Errorf("diff or old and new is required, e.g. %s", patchExample)
+	}
+	if !hasNew {
+		return "", fmt.Errorf("new is required, e.g. %s", patchExample)
+	}
+	count := 0
+	if hasCount {
+		var err error
+		count, err = req.RequireInt("count")
+		if err != nil || count < 1 {
+			return "", errors.New("count must be at least 1")
+		}
+	}
+	return Replace(root, path, req.GetString("old", ""), req.GetString("new", ""), count)
+}
+
 func deleteFile(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	path, err := requirePath(req)
+	path, err := requirePath(req, pathExample)
 	if err != nil {
 		return toolErr(err), nil
 	}
@@ -200,10 +240,10 @@ func deleteFile(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, erro
 	return mcp.NewToolResultText(text), nil
 }
 
-func requirePath(req mcp.CallToolRequest) (string, error) {
+func requirePath(req mcp.CallToolRequest, example string) (string, error) {
 	path, err := req.RequireString("path")
 	if err != nil || strings.TrimSpace(path) == "" {
-		return "", errors.New("path is required")
+		return "", fmt.Errorf("path is required, e.g. %s", example)
 	}
 	return path, nil
 }
