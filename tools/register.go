@@ -98,11 +98,11 @@ func Register(s *mcpserver.MCPServer, root, tier string) (int, error) {
 			})
 		case ToolFilePatch:
 			s.AddTool(mcp.NewTool(name,
-				mcp.WithDescription(descPatch+" Send old and new to replace exact text everywhere it appears, or diff for a unified diff. Exactly one mode. Omit count to replace every match; set count to require that many. A miss writes nothing."),
+				mcp.WithDescription(descPatch+" To rename, send old and new together; every exact match is replaced. new is required with old, and old alone writes nothing. Or send diff alone for a unified diff. Omit count to replace every match; set count to require that many."),
 				mcp.WithString("path", mcp.Required(), mcp.Description("Existing file to patch.")),
 				mcp.WithString("diff", mcp.Description("Unified diff for this one file. Omit when sending old and new.")),
-				mcp.WithString("old", mcp.Description("Exact text to replace, including a name that appears more than once. Omit when sending diff.")),
-				mcp.WithString("new", mcp.Description("Replacement for old. Empty deletes the matched text.")),
+				mcp.WithString("old", mcp.Description("Exact text to replace. Send new with it. old alone writes nothing.")),
+				mcp.WithString("new", mcp.Description("Required with old. The replacement text. An empty string deletes old.")),
 				mcp.WithNumber("count", mcp.Description("Exact number of matches required. Omit to replace all. Any other number writes nothing.")),
 				mcp.WithDestructiveHintAnnotation(true),
 			), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -208,14 +208,19 @@ func editFile(root, path string, req mcp.CallToolRequest) (string, error) {
 	if hasDiff {
 		return Patch(root, path, diff)
 	}
-	if !hasOld || req.GetString("old", "") == "" {
+	old := req.GetString("old", "")
+	if !hasOld || old == "" {
 		if hasNew {
 			return "", fmt.Errorf("old is required, e.g. %s", patchExample)
 		}
 		return "", fmt.Errorf("diff or old and new is required, e.g. %s", patchExample)
 	}
 	if !hasNew {
-		return "", fmt.Errorf("new is required, e.g. %s", patchExample)
+		return "", newRequired(path, old)
+	}
+	newText, ok := args["new"].(string)
+	if !ok {
+		return "", newRequired(path, old)
 	}
 	count := 0
 	if hasCount {
@@ -225,7 +230,11 @@ func editFile(root, path string, req mcp.CallToolRequest) (string, error) {
 			return "", errors.New("count must be at least 1")
 		}
 	}
-	return Replace(root, path, req.GetString("old", ""), req.GetString("new", ""), count)
+	return Replace(root, path, old, newText, count)
+}
+
+func newRequired(path, old string) error {
+	return fmt.Errorf("new is required with old, nothing written (path %q, old %q)", path, old)
 }
 
 func deleteFile(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

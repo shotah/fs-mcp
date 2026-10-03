@@ -167,6 +167,25 @@ func TestReplaceMode(t *testing.T) {
 	if _, err := Register(s, root, TierCore); err != nil {
 		t.Fatal(err)
 	}
+	noNew, isErr := callTool(t, s, ToolFilePatch, map[string]any{
+		"path": "hello_test.go", "old": "Hello",
+	})
+	if !isErr || !strings.Contains(noNew, "new is required") || !strings.Contains(noNew, "hello_test.go") || !strings.Contains(noNew, "Hello") {
+		t.Fatalf("missing new = %q err=%v", noNew, isErr)
+	}
+	nullNew, isErr := callTool(t, s, ToolFilePatch, map[string]any{
+		"path": "hello_test.go", "old": "Hello", "new": nil,
+	})
+	if !isErr || !strings.Contains(nullNew, "new is required") {
+		t.Fatalf("null new = %q err=%v", nullNew, isErr)
+	}
+	untouched, err := os.ReadFile(filepath.Join(root, "hello_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(untouched) != src {
+		t.Fatalf("missing new changed the file to %q", untouched)
+	}
 	replaced, isErr := callTool(t, s, ToolFilePatch, map[string]any{
 		"path": "hello_test.go", "old": "Hello", "new": "Greet",
 	})
