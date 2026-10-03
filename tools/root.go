@@ -34,7 +34,8 @@ func CleanRoot(root string) (string, error) {
 
 // Resolve maps p into root. Missing path components are allowed when
 // allowMissing is set, so create can jail a file that does not exist yet.
-// Symlinks are followed and must stay inside root.
+// A leading slash that is not already inside root is the workspace root:
+// /c.txt is <root>/c.txt. Symlinks are followed and must stay inside root.
 func Resolve(root, p string, allowMissing bool) (string, error) {
 	if strings.ContainsRune(p, 0) {
 		return "", errors.New("invalid path")
@@ -43,6 +44,7 @@ func Resolve(root, p string, allowMissing bool) (string, error) {
 	if p == "" {
 		p = "."
 	}
+	p = slashFromRoot(root, p)
 	var lexical string
 	if filepath.IsAbs(p) {
 		lexical = filepath.Clean(p)
@@ -98,6 +100,23 @@ func Resolve(root, p string, allowMissing bool) (string, error) {
 		return "", err
 	}
 	return cur, nil
+}
+
+// slashFromRoot leaves an absolute path that is already inside root alone.
+// Any other absolute path drops its leading slash and is resolved from root.
+// ".." in that relative form still has to pass the jail.
+func slashFromRoot(root, p string) string {
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	if inside(root, filepath.Clean(p)) == nil {
+		return filepath.Clean(p)
+	}
+	rel := strings.TrimLeft(p, `/\`)
+	if rel == "" {
+		return "."
+	}
+	return rel
 }
 
 func inside(root, path string) error {

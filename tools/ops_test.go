@@ -138,6 +138,20 @@ func TestJail(t *testing.T) {
 	if _, err := Read(root, absOutside, 0, 0); err == nil {
 		t.Fatal("absolute escape was readable")
 	}
+	if err := os.WriteFile(filepath.Join(root, "c.txt"), []byte("see"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(root, "/c.txt", 0, 0)
+	if err != nil || got != "see" {
+		t.Fatalf("leading slash = %q %v", got, err)
+	}
+	got, err = Read(root, filepath.Join(root, "c.txt"), 0, 0)
+	if err != nil || got != "see" {
+		t.Fatalf("absolute inside root = %q %v", got, err)
+	}
+	if _, err := Read(root, "/../c.txt", 0, 0); err == nil {
+		t.Fatal("leading slash with .. was readable")
+	}
 }
 
 func TestReadListSearchCreatePatch(t *testing.T) {

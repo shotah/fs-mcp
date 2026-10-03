@@ -28,7 +28,7 @@ Naming: [george docs/mcp-naming.md](https://github.com/shotah/george/blob/main/d
 | `file_patch` | core | `fs__file_patch` |
 | `file_delete` | write | `fs__file_delete` |
 
-`--root` is the jail. A path that leaves it, including through a symlink, is refused. `file_patch` replaces exact text (`old`/`new`) or applies one unified diff, and writes nothing when the edit does not match.
+`--root` is the jail. A path that leaves it, including through a symlink, is refused. A leading `/` that is not already inside the jail is the workspace root (`/c.txt` is `c.txt`). `file_patch` replaces exact text (`old`/`new`) or applies one unified diff, and writes nothing when the edit does not match.
 
 ## Run
 
