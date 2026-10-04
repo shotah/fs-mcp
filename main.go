@@ -6,9 +6,10 @@ import (
 	"os"
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/spf13/cobra"
+
 	"github.com/shotah/fs-mcp/server"
 	"github.com/shotah/fs-mcp/tools"
-	"github.com/spf13/cobra"
 )
 
 func main() {
