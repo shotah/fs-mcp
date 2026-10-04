@@ -34,7 +34,7 @@ const (
 
 	pathExample  = `{"path":"a.go"}`
 	queryExample = `{"query":"needle"}`
-	patchExample = `{"path":"a.go","old":"Hello","new":"Greet"} or {"path":"a.go","diff":"@@ -1 +1 @@\n-old\n+new\n"}`
+	patchExample = `{"path":"a.go","old":"Hello","new":"Greet"} or {"path":"a.go","diff":"@@ -1 +1 @@\n-old\n+new\n"} or {"path":"a.go","after_line":0,"new":"text"}`
 	descDelete   = "Delete one file by path."
 )
 
@@ -68,10 +68,11 @@ func Register(s *mcpserver.MCPServer, root, tier string) (int, error) {
 			})
 		case ToolFileGet:
 			s.AddTool(mcp.NewTool(name,
-				mcp.WithDescription(descGet+" offset is a 1-based line number. A binary file returns a one-line marker."),
+				mcp.WithDescription(descGet+" offset is a 1-based line number. Every line is numbered, and the result opens with a range header. A page is at most limit lines and max_chars, cut at a line. A binary file returns a one-line marker."),
 				mcp.WithString("path", mcp.Required(), mcp.Description("File to read, relative to the workspace root.")),
 				mcp.WithNumber("offset", mcp.Description("First line to return, 1-based. Default 1.")),
 				mcp.WithNumber("limit", mcp.Description("Maximum lines. Default 200, max 2000.")),
+				mcp.WithNumber("max_chars", mcp.Description("Maximum bytes in the result, including the range header and line numbers. Default 6000. Cut at a line.")),
 				mcp.WithReadOnlyHintAnnotation(true),
 			), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				return get(root, req)
@@ -98,11 +99,12 @@ func Register(s *mcpserver.MCPServer, root, tier string) (int, error) {
 			})
 		case ToolFilePatch:
 			s.AddTool(mcp.NewTool(name,
-				mcp.WithDescription(descPatch+" To rename, send old and new together; every exact match is replaced. new is required with old, and old alone writes nothing. Or send diff alone for a unified diff. Omit count to replace every match; set count to require that many."),
+				mcp.WithDescription(descPatch+" Send exactly one of diff, old, or after_line. old and new replace text; one forgiving match is used when the bytes are not exact. new is required with old, and old alone writes nothing. diff is a unified diff. after_line and new insert text after that line (0 inserts at the top). Omit count to replace every exact match; set count to require that many."),
 				mcp.WithString("path", mcp.Required(), mcp.Description("Existing file to patch.")),
-				mcp.WithString("diff", mcp.Description("Unified diff for this one file. Omit when sending old and new.")),
-				mcp.WithString("old", mcp.Description("Exact text to replace. Send new with it. old alone writes nothing.")),
-				mcp.WithString("new", mcp.Description("Required with old. The replacement text. An empty string deletes old.")),
+				mcp.WithString("diff", mcp.Description("Unified diff for this one file. Omit when sending old or after_line.")),
+				mcp.WithString("old", mcp.Description("Text to replace. Send new with it. old alone writes nothing.")),
+				mcp.WithString("new", mcp.Description("Required with old or after_line. Replacement or inserted text. An empty string deletes old.")),
+				mcp.WithNumber("after_line", mcp.Description("Insert new after this 1-based line. 0 inserts at the top. The last line appends.")),
 				mcp.WithNumber("count", mcp.Description("Exact number of matches required. Omit to replace all. Any other number writes nothing.")),
 				mcp.WithDestructiveHintAnnotation(true),
 			), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -140,7 +142,7 @@ func get(root string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if err != nil {
 		return toolErr(err), nil
 	}
-	text, err := Read(root, path, req.GetInt("offset", 0), req.GetInt("limit", 0))
+	text, err := Read(root, path, req.GetInt("offset", 0), req.GetInt("limit", 0), req.GetInt("max_chars", 0))
 	if err != nil {
 		return toolErr(err), nil
 	}
@@ -197,10 +199,10 @@ func editFile(root, path string, req mcp.CallToolRequest) (string, error) {
 	_, hasOld := args["old"]
 	_, hasNew := args["new"]
 	_, hasCount := args["count"]
+	_, hasAfter := args["after_line"]
 	hasDiff := strings.TrimSpace(diff) != ""
-	hasReplace := hasOld || hasNew
-	if hasDiff && hasReplace {
-		return "", fmt.Errorf("send exactly one of diff or old and new, e.g. %s", patchExample)
+	if err := oneEditMode(hasDiff, hasOld, hasAfter); err != nil {
+		return "", err
 	}
 	if hasCount && !hasOld {
 		return "", fmt.Errorf("count is only used with old and new, e.g. %s", patchExample)
@@ -208,6 +210,45 @@ func editFile(root, path string, req mcp.CallToolRequest) (string, error) {
 	if hasDiff {
 		return Patch(root, path, diff)
 	}
+	if hasAfter {
+		return insertMode(root, path, req, hasNew)
+	}
+	return replaceMode(root, path, req, hasOld, hasNew, hasCount)
+}
+
+func oneEditMode(hasDiff, hasOld, hasAfter bool) error {
+	n := 0
+	if hasDiff {
+		n++
+	}
+	if hasOld {
+		n++
+	}
+	if hasAfter {
+		n++
+	}
+	if n > 1 {
+		return fmt.Errorf("send exactly one of diff, old, or after_line, e.g. %s", patchExample)
+	}
+	return nil
+}
+
+func insertMode(root, path string, req mcp.CallToolRequest, hasNew bool) (string, error) {
+	if !hasNew {
+		return "", fmt.Errorf("new is required with after_line, e.g. %s", patchExample)
+	}
+	newText, ok := req.GetArguments()["new"].(string)
+	if !ok {
+		return "", fmt.Errorf("new is required with after_line, e.g. %s", patchExample)
+	}
+	after, err := req.RequireInt("after_line")
+	if err != nil || after < 0 {
+		return "", errors.New("after_line must be 0 or a line number")
+	}
+	return Insert(root, path, after, newText)
+}
+
+func replaceMode(root, path string, req mcp.CallToolRequest, hasOld, hasNew, hasCount bool) (string, error) {
 	old := req.GetString("old", "")
 	if !hasOld || old == "" {
 		if hasNew {
@@ -218,7 +259,7 @@ func editFile(root, path string, req mcp.CallToolRequest) (string, error) {
 	if !hasNew {
 		return "", newRequired(path, old)
 	}
-	newText, ok := args["new"].(string)
+	newText, ok := req.GetArguments()["new"].(string)
 	if !ok {
 		return "", newRequired(path, old)
 	}

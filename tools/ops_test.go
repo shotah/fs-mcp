@@ -10,6 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
+
 	"github.com/shotah/fs-mcp/server"
 )
 
@@ -128,28 +129,28 @@ func TestJail(t *testing.T) {
 	if err := os.Symlink(secret, filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Read(root, "link", 0, 0); err == nil {
+	if _, err := Read(root, "link", 0, 0, 0); err == nil {
 		t.Fatal("symlink out of the jail was readable")
 	}
-	if _, err := Read(root, filepath.Join("..", filepath.Base(outside), "secret"), 0, 0); err == nil {
+	if _, err := Read(root, filepath.Join("..", filepath.Base(outside), "secret"), 0, 0, 0); err == nil {
 		t.Fatal("relative escape was readable")
 	}
 	absOutside := filepath.Join(outside, "secret")
-	if _, err := Read(root, absOutside, 0, 0); err == nil {
+	if _, err := Read(root, absOutside, 0, 0, 0); err == nil {
 		t.Fatal("absolute escape was readable")
 	}
 	if err := os.WriteFile(filepath.Join(root, "c.txt"), []byte("see"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Read(root, "/c.txt", 0, 0)
-	if err != nil || got != "see" {
+	got, err := Read(root, "/c.txt", 0, 0, 0)
+	if err != nil || got != "range: 1-1 of 1; end\n1: see" {
 		t.Fatalf("leading slash = %q %v", got, err)
 	}
-	got, err = Read(root, filepath.Join(root, "c.txt"), 0, 0)
-	if err != nil || got != "see" {
+	got, err = Read(root, filepath.Join(root, "c.txt"), 0, 0, 0)
+	if err != nil || got != "range: 1-1 of 1; end\n1: see" {
 		t.Fatalf("absolute inside root = %q %v", got, err)
 	}
-	if _, err := Read(root, "/../c.txt", 0, 0); err == nil {
+	if _, err := Read(root, "/../c.txt", 0, 0, 0); err == nil {
 		t.Fatal("leading slash with .. was readable")
 	}
 }
@@ -175,18 +176,18 @@ func TestReadListSearchCreatePatch(t *testing.T) {
 		t.Fatalf("list = %+v", listed)
 	}
 
-	body, err := Read(root, "sub/a.txt", 0, 0)
+	body, err := Read(root, "sub/a.txt", 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body != "alpha\nbeta\n" {
+	if body != "range: 1-2 of 2; end\n1: alpha\n2: beta" {
 		t.Fatalf("read = %q", body)
 	}
-	window, err := Read(root, "sub/a.txt", 2, 1)
+	window, err := Read(root, "sub/a.txt", 2, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(window, "range: 2-2 of 2\n") || !strings.Contains(window, "beta") {
+	if window != "range: 2-2 of 2; end\n2: beta" {
 		t.Fatalf("window = %q", window)
 	}
 
@@ -264,7 +265,7 @@ func TestBinaryMarker(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "bin.dat"), []byte{0, 1, 2}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Read(root, "bin.dat", 0, 0)
+	got, err := Read(root, "bin.dat", 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

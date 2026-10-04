@@ -11,6 +11,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
+
 	"github.com/shotah/fs-mcp/server"
 )
 
@@ -64,21 +65,21 @@ func TestListAndReadEdges(t *testing.T) {
 	if _, err := List(root, "note.txt"); err == nil {
 		t.Fatal("listed a file")
 	}
-	body, err := Read(root, "note.txt", 0, 0)
-	if err != nil || body != "alpha" {
+	body, err := Read(root, "note.txt", 0, 0, 0)
+	if err != nil || body != "range: 1-1 of 1; end\n1: alpha" {
 		t.Fatalf("read = %q %v", body, err)
 	}
-	empty, err := Read(root, "empty.txt", 0, 0)
-	if err != nil || empty != "" {
+	empty, err := Read(root, "empty.txt", 0, 0, 0)
+	if err != nil || empty != "range: 0-0 of 0; end" {
 		t.Fatalf("empty = %q %v", empty, err)
 	}
-	if _, err := Read(root, ".", 0, 0); err == nil {
+	if _, err := Read(root, ".", 0, 0, 0); err == nil {
 		t.Fatal("read a directory")
 	}
-	if _, err := Read(root, "note.txt", 9, 1); err == nil {
+	if _, err := Read(root, "note.txt", 9, 1, 0); err == nil || !strings.Contains(err.Error(), "last line 1") {
 		t.Fatal("offset past end was accepted")
 	}
-	if _, err := Read(root, "a\x00b", 0, 0); err == nil {
+	if _, err := Read(root, "a\x00b", 0, 0, 0); err == nil {
 		t.Fatal("nul path was accepted")
 	}
 	if _, err := ToolNames(""); err != nil {

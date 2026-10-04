@@ -195,43 +195,16 @@ func fragmentSpans(frags []*gitdiff.TextFragment) [][2]int {
 	return spans
 }
 
-// replaceSpans replaces non-overlapping copies of old and reports the line
-// spans each replacement occupies in the result. A deletion is a zero-width span.
-func replaceSpans(content, old, newText string) (string, [][2]int) {
-	var b strings.Builder
-	spans := make([][2]int, 0, strings.Count(content, old))
-	line := 0
-	rest := content
-	for {
-		i := strings.Index(rest, old)
-		if i < 0 {
-			b.WriteString(rest)
-			break
-		}
-		b.WriteString(rest[:i])
-		start := line + strings.Count(rest[:i], "\n")
-		nl := strings.Count(newText, "\n")
-		end := start
-		if newText != "" {
-			if strings.HasSuffix(newText, "\n") {
-				end = start + nl
-			} else {
-				end = start + nl + 1
-			}
-		}
-		spans = append(spans, [2]int{start, end})
-		b.WriteString(newText)
-		line = start + nl
-		rest = rest[i+len(old):]
-	}
-	return b.String(), spans
-}
-
-func formatPatchResult(rel string, after []byte, spans [][2]int) string {
+func formatPatchResult(rel string, after []byte, spans [][2]int, note string) string {
 	body, truncated := formatChangedLines(splitLines(after), spans)
 	var b strings.Builder
 	b.WriteString("patched: ")
 	b.WriteString(rel)
+	if note != "" {
+		b.WriteString(" (")
+		b.WriteString(note)
+		b.WriteByte(')')
+	}
 	if body != "" {
 		b.WriteByte('\n')
 		b.WriteString(body)

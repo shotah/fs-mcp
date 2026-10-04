@@ -44,6 +44,7 @@ func Resolve(root, p string, allowMissing bool) (string, error) {
 	if p == "" {
 		p = "."
 	}
+	requested := p
 	p = slashFromRoot(root, p)
 	var lexical string
 	if filepath.IsAbs(p) {
@@ -81,6 +82,9 @@ func Resolve(root, p string, allowMissing bool) (string, error) {
 				}
 				return dest, nil
 			}
+			if os.IsNotExist(err) {
+				return "", missingPath(cur, part, requested)
+			}
 			return "", err
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
@@ -117,6 +121,25 @@ func slashFromRoot(root, p string) string {
 		return "."
 	}
 	return rel
+}
+
+func missingPath(dir, name, requested string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("no such file %s", requested)
+	}
+	match := ""
+	n := 0
+	for _, e := range entries {
+		if strings.EqualFold(e.Name(), name) {
+			n++
+			match = e.Name()
+		}
+	}
+	if n == 1 {
+		return fmt.Errorf("no such file %s; did you mean %s?", requested, match)
+	}
+	return fmt.Errorf("no such file %s", requested)
 }
 
 func inside(root, path string) error {

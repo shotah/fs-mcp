@@ -20,6 +20,7 @@ import (
 const (
 	defaultGetLines  = 200
 	maxGetLines      = 2000
+	defaultMaxChars  = 6000
 	maxFileBytes     = 2 << 20
 	maxSearchHits    = 40
 	maxSearchFiles   = 4000
@@ -95,9 +96,11 @@ func List(root, path string) (ListResult, error) {
 	return out, nil
 }
 
-// Read returns file text. A binary file is a one-line marker, not an error.
+// Read returns file text. Every line is "N: text" and the result opens with
+// a range header. A page is at most limit lines and maxChars bytes, cut at a
+// line. maxChars 0 uses the default. A binary file is a one-line marker.
 // offset is 1-based. limit 0 uses the default line window.
-func Read(root, path string, offset, limit int) (string, error) {
+func Read(root, path string, offset, limit, maxChars int) (string, error) {
 	abs, err := Resolve(root, path, false)
 	if err != nil {
 		return "", err
@@ -132,6 +135,10 @@ func Read(root, path string, offset, limit int) (string, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
+	content, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+	if err != nil {
+		return "", err
+	}
 	if offset < 1 {
 		offset = 1
 	}
@@ -141,55 +148,77 @@ func Read(root, path string, offset, limit int) (string, error) {
 	if limit > maxGetLines {
 		limit = maxGetLines
 	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	var (
-		lines []string
-		total int
-	)
-	for sc.Scan() {
-		total++
-		if total < offset {
-			continue
-		}
-		if len(lines) >= limit {
-			continue
-		}
-		lines = append(lines, sc.Text())
+	if maxChars < 1 {
+		maxChars = defaultMaxChars
 	}
-	if err := sc.Err(); err != nil {
-		return "", err
-	}
-	if total == 0 {
-		return "", nil
-	}
-	if offset > total {
-		return "", fmt.Errorf("offset %d is past end (%d lines)", offset, total)
-	}
-	end := offset + len(lines) - 1
-	body := strings.Join(lines, "\n")
-	if offset == 1 && end == total {
-		if endsWithNewline(f) {
-			body += "\n"
-		}
-		return body, nil
-	}
-	return fmt.Sprintf("range: %d-%d of %d\n%s\n", offset, end, total, body), nil
+	return formatPage(splitLines(content), offset, limit, maxChars)
 }
 
-func endsWithNewline(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil || info.Size() == 0 {
-		return false
+func formatPage(lines []string, offset, limit, maxChars int) (string, error) {
+	total := len(lines)
+	if total == 0 {
+		if offset > 1 {
+			return "", fmt.Errorf("offset %d is past end (last line 0)", offset)
+		}
+		return "range: 0-0 of 0; end", nil
 	}
-	if _, err := f.Seek(-1, io.SeekEnd); err != nil {
-		return false
+	if offset > total {
+		return "", fmt.Errorf("offset %d is past end (last line %d)", offset, total)
 	}
-	var b [1]byte
-	if _, err := f.Read(b[:]); err != nil {
-		return false
+	start := offset - 1
+	end := min(start+limit, total)
+	for end > start {
+		page := renderPage(lines, start, end, total)
+		if len(page) <= maxChars {
+			return page, nil
+		}
+		if end == start+1 {
+			return clipPageLine(lines[start], start, total, maxChars), nil
+		}
+		end--
 	}
-	return b[0] == '\n'
+	return "", errors.New("empty page")
+}
+
+func rangeHeader(start, end, total int) string {
+	if end < total {
+		return fmt.Sprintf("range: %d-%d of %d; next offset %d", start+1, end, total, end+1)
+	}
+	return fmt.Sprintf("range: %d-%d of %d; end", start+1, end, total)
+}
+
+func renderPage(lines []string, start, end, total int) string {
+	var b strings.Builder
+	b.WriteString(rangeHeader(start, end, total))
+	for i := start; i < end; i++ {
+		fmt.Fprintf(&b, "\n%d: %s", i+1, lines[i])
+	}
+	return b.String()
+}
+
+func clipPageLine(line string, index, total, maxChars int) string {
+	header := rangeHeader(index, index+1, total)
+	prefix := fmt.Sprintf("\n%d: ", index+1)
+	budget := maxChars - len(header) - len(prefix)
+	if budget <= 0 {
+		return header
+	}
+	return header + prefix + clipToBytes(line, budget)
+}
+
+func clipToBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	i := 0
+	for i < len(s) {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		if i+size > n {
+			break
+		}
+		i += size
+	}
+	return s[:i]
 }
 
 // Search walks path for a literal query. glob matches the base name.
@@ -361,11 +390,12 @@ func Patch(root, path, diff string) (string, error) {
 	if err := writeAtomic(abs, next, info.Mode().Perm()); err != nil {
 		return "", err
 	}
-	return formatPatchResult(rel, next, spans), nil
+	return formatPatchResult(rel, next, spans, ""), nil
 }
 
-// Replace writes newText over each exact old in one file.
-// count 0 replaces every match. Any other count must equal the number of matches.
+// Replace writes newText over old in one file.
+// count 0 replaces every exact match, or one forgiving match when nothing is exact.
+// A positive count must equal the number of matches at the level that hits.
 // Zero matches or a count miss writes nothing.
 func Replace(root, path, old, newText string, count int) (string, error) {
 	if old == "" {
@@ -379,22 +409,36 @@ func Replace(root, path, old, newText string, count int) (string, error) {
 		return "", err
 	}
 	text := string(content)
-	n := strings.Count(text, old)
-	if n == 0 {
-		return "", fmt.Errorf("0 matches for old in %s; nothing written", rel)
+	spans, note, err := locateOld(rel, text, old, count)
+	if err != nil {
+		return "", err
 	}
-	if count > 0 && n != count {
-		return "", fmt.Errorf("found %d matches for old in %s, want %d; nothing written", n, rel, count)
-	}
-	if old == newText {
+	nextText, lineSpans := applyByteSpans(text, newText, spans)
+	if nextText == text {
 		return "", fmt.Errorf("old and new are the same in %s; nothing written", rel)
 	}
-	nextText, spans := replaceSpans(text, old, newText)
 	next := []byte(nextText)
 	if err := writeAtomic(abs, next, info.Mode().Perm()); err != nil {
 		return "", err
 	}
-	return formatPatchResult(rel, next, spans), nil
+	return formatPatchResult(rel, next, lineSpans, note), nil
+}
+
+// Insert writes newText after a 1-based line. Line 0 inserts at the top.
+func Insert(root, path string, after int, newText string) (string, error) {
+	abs, rel, info, content, err := loadTextFile(root, path)
+	if err != nil {
+		return "", err
+	}
+	nextText, spans, err := insertAfter(string(content), after, newText)
+	if err != nil {
+		return "", err
+	}
+	next := []byte(nextText)
+	if err := writeAtomic(abs, next, info.Mode().Perm()); err != nil {
+		return "", err
+	}
+	return formatPatchResult(rel, next, spans, ""), nil
 }
 
 func loadTextFile(root, path string) (abs, rel string, info os.FileInfo, content []byte, err error) {
