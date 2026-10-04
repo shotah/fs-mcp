@@ -63,29 +63,69 @@ func normalizeDiff(relPath, diff string) (string, error) {
 	if diff == "" {
 		return "", errors.New("diff is required")
 	}
-	gitFiles := 0
-	for line := range strings.SplitSeq(diff, "\n") {
-		if strings.HasPrefix(line, "diff --git ") {
-			gitFiles++
-		}
-	}
-	if gitFiles > 1 {
-		return "", errors.New("one file per call")
-	}
 	if !strings.HasPrefix(diff, "@@") && !strings.Contains(diff, "\n@@") {
 		return "", errors.New("diff has no hunks")
 	}
-	if !strings.Contains(diff, "--- ") {
+	// A "--- " after the first hunk is a later copy or a deleted line, not a header.
+	if !headerBeforeFirstHunk(diff) {
 		relPath = strings.TrimSpace(relPath)
 		if relPath == "" {
 			relPath = "file"
 		}
 		diff = "--- a/" + relPath + "\n+++ b/" + relPath + "\n" + diff + "\n"
 	}
+	if countDiffFiles(diff) > 1 {
+		return "", errors.New("one file per call")
+	}
 	if !strings.HasSuffix(diff, "\n") {
 		diff += "\n"
 	}
 	return recountHunkHeaders(diff), nil
+}
+
+// countDiffFiles counts git headers and traditional "--- "/"+++ " pairs.
+// A pair that belongs to a diff --git header is not a second file.
+func countDiffFiles(diff string) int {
+	lines := strings.Split(diff, "\n")
+	n := 0
+	gitPending := false
+	for i := 0; i < len(lines); i++ {
+		switch {
+		case strings.HasPrefix(lines[i], "diff --git "):
+			n++
+			gitPending = true
+		case strings.HasPrefix(lines[i], "@@"):
+			gitPending = false
+		case traditionalPair(lines, i):
+			if !gitPending {
+				n++
+			}
+			gitPending = false
+			i++
+		}
+	}
+	return n
+}
+
+func traditionalPair(lines []string, i int) bool {
+	if i+2 >= len(lines) {
+		return false
+	}
+	return strings.HasPrefix(lines[i], "--- ") &&
+		strings.HasPrefix(lines[i+1], "+++ ") &&
+		strings.HasPrefix(lines[i+2], "@@")
+}
+
+func headerBeforeFirstHunk(diff string) bool {
+	for line := range strings.SplitSeq(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			return false
+		case strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "diff --git "):
+			return true
+		}
+	}
+	return false
 }
 
 // recountHunkHeaders rewrites each @@ old,new count from the hunk body.

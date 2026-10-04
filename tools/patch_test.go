@@ -211,3 +211,35 @@ func TestReplaceMode(t *testing.T) {
 		t.Fatalf("search = %q err=%v", noQuery, isErr)
 	}
 }
+
+func TestHeaderAfterFirstHunk(t *testing.T) {
+	t.Parallel()
+	// A deleted line "-- section" is "--- section" in the diff. That is not a header.
+	body := []byte("keep\n-- section\nkeep\n")
+	bare := "@@ -1,3 +1,3 @@\n keep\n--- section\n+## section\n keep\n"
+	next, err := ApplyUnified("readme.md", bare, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(next) != "keep\n## section\nkeep\n" {
+		t.Fatalf("deleted dashes = %q", next)
+	}
+
+	// The same hunks twice: bare, then a real header. One file per call.
+	twice := bare + "--- a/readme.md\n+++ b/readme.md\n" + bare
+	_, err = ApplyUnified("readme.md", twice, body)
+	if err == nil || err.Error() != "one file per call" || strings.Contains(err.Error(), "patch fragment without file header") {
+		t.Fatalf("repeated = %v", err)
+	}
+
+	two := "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-a\n+b\n"
+	if _, err := ApplyUnified("a", two, []byte("a\n")); err == nil || err.Error() != "one file per call" {
+		t.Fatalf("two traditional files = %v", err)
+	}
+
+	git := "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
+	next, err = ApplyUnified("f", git, []byte("a\n"))
+	if err != nil || string(next) != "b\n" {
+		t.Fatalf("git header = %q %v", next, err)
+	}
+}
